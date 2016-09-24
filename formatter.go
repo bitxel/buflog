@@ -7,8 +7,10 @@ import (
 	"time"
 )
 
+// Formatter is the interface to Format an log entry
 type Formatter interface {
 	Format(*Entity) ([]byte, error)
+	UpdateTimestampFormat(int)
 }
 
 const (
@@ -25,17 +27,26 @@ const (
 var (
 	baseTimestamp time.Time
 	isTerminal    bool
-	isColored     bool = true
+	level2color   []int
+	isColored     = true
 )
 
 func init() {
 	baseTimestamp = time.Now()
+	level2color = make([]int, 7)
+	level2color[DebugLevel] = gray
+	level2color[InfoLevel] = blue
+	level2color[WarnLevel] = yellow
+	level2color[ErrorLevel] = red
+	level2color[FatalLevel] = red
+	level2color[PanicLevel] = red
 }
 
 func miniTS() int {
 	return int(time.Since(baseTimestamp) / time.Second)
 }
 
+// TextFormatter is an implementation of Formatter interface
 type TextFormatter struct {
 	// Set to true to bypass checking for a TTY before outputting colors.
 	ForceColors bool
@@ -58,8 +69,28 @@ type TextFormatter struct {
 	// that log extremely frequently and don't use the JSON formatter this may not
 	// be desired.
 	DisableSorting bool
+	IsUTC          bool
 }
 
+// UpdateTimestampFormat by flag parameter
+func (f *TextFormatter) UpdateTimestampFormat(flag int) {
+	format := ""
+	if flag&LUTC != 0 {
+		f.IsUTC = true
+	}
+	if flag&Ldate != 0 {
+		format += "2006/01/02 "
+	}
+	if l.Flag&(Ltime|Lmicroseconds) != 0 {
+		format += "15:04:05"
+		if flag&Lmicroseconds != 0 {
+			format += ".999999"
+		}
+	}
+	f.TimestampFormat = format
+}
+
+// Format return the formated entity data to bytes, return it and error
 func (f *TextFormatter) Format(entity *Entity) ([]byte, error) {
 
 	//isColorTerminal := isTerminal && (runtime.GOOS != "windows")
@@ -67,53 +98,36 @@ func (f *TextFormatter) Format(entity *Entity) ([]byte, error) {
 
 	b := &bytes.Buffer{}
 
-	timestampFormat := f.TimestampFormat
-	if timestampFormat == "" {
-		timestampFormat = DefaultTimestampFormat
-	}
-
 	for _, entry := range entity.cache {
-		if isColored {
-			f.printColored(b, entity.Id, entry, timestampFormat)
-		} else {
-			if !f.DisableTimestamp {
-				f.appendKeyValue(b, "time", entry.Time.Format(timestampFormat))
-			}
-			f.appendKeyValue(b, "level", entry.Level.String())
-			if entry.Data != "" {
-				f.appendKeyValue(b, "msg", entry.Data)
+
+		if entity.logger.Prefix != "" {
+			b.WriteString(entity.logger.Prefix)
+		}
+
+		if f.IsUTC {
+			entry.Time = entry.Time.UTC()
+		}
+
+		// TODO may encounter effective issue using so many fmt
+		f.appendKeyValue(b, true, entry.Level, "level", strings.ToUpper(entry.Level.String())[0:4])
+		if !f.DisableTimestamp {
+			if f.FullTimestamp {
+				f.appendKeyValue(b, false, entry.Level, "time", fmt.Sprintf("[%s]", entry.Time.Format(f.TimestampFormat)))
+			} else {
+				f.appendKeyValue(b, false, entry.Level, "time", fmt.Sprintf("[%d]", miniTS()))
 			}
 		}
+		if entity.ID != "" {
+			f.appendKeyValue(b, true, entry.Level, "id", entity.ID)
+		}
+		if entity.logger.Flag&(Llongfile|Lshortfile) != 0 {
+			f.appendKeyValue(b, false, entry.Level, "file", "")
+		}
+		f.appendKeyValue(b, false, entry.Level, "msg", entry.Data)
 		b.WriteByte('\n')
 	}
 
 	return b.Bytes(), nil
-}
-
-func (f *TextFormatter) printColored(b *bytes.Buffer, id string, entry *Entry, timestampFormat string) {
-	var levelColor int
-	switch entry.Level {
-	case DebugLevel:
-		levelColor = gray
-	case WarnLevel:
-		levelColor = yellow
-	case ErrorLevel, FatalLevel:
-		levelColor = red
-	default:
-		levelColor = blue
-	}
-
-	levelText := strings.ToUpper(entry.Level.String())[0:4]
-
-	if !f.FullTimestamp {
-		fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%04d]", levelColor, levelText, miniTS())
-	} else {
-		fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s]", levelColor, levelText, entry.Time.Format(timestampFormat))
-	}
-	if id != "" {
-		fmt.Fprintf(b, " \x1b[%dm[%s]\x1b[0m", levelColor, id)
-	}
-	fmt.Fprintf(b, " %-44s ", entry.Data)
 }
 
 func needsQuoting(text string) bool {
@@ -128,28 +142,33 @@ func needsQuoting(text string) bool {
 	return true
 }
 
-func (f *TextFormatter) appendKeyValue(b *bytes.Buffer, key string, value interface{}) {
-
-	b.WriteString(key)
-	b.WriteByte('=')
-
-	switch value := value.(type) {
-	case string:
-		if needsQuoting(value) {
-			b.WriteString(value)
+func (f *TextFormatter) appendKeyValue(b *bytes.Buffer, colorit bool, level Level, key string, value interface{}) {
+	if isColored {
+		if colorit {
+			fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m", level2color[level], value)
 		} else {
-			fmt.Fprintf(b, "%q", value)
+			fmt.Fprint(b, value)
 		}
-	case error:
-		errmsg := value.Error()
-		if needsQuoting(errmsg) {
-			b.WriteString(errmsg)
-		} else {
-			fmt.Fprintf(b, "%q", value)
+	} else {
+		b.WriteString(key)
+		b.WriteByte('=')
+		switch value := value.(type) {
+		case string:
+			if needsQuoting(value) {
+				b.WriteString(value)
+			} else {
+				fmt.Fprintf(b, "%q", value)
+			}
+		case error:
+			errmsg := value.Error()
+			if needsQuoting(errmsg) {
+				b.WriteString(errmsg)
+			} else {
+				fmt.Fprintf(b, "%q", value)
+			}
+		default:
+			fmt.Fprint(b, value)
 		}
-	default:
-		fmt.Fprint(b, value)
 	}
-
 	b.WriteByte(' ')
 }
