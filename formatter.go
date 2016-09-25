@@ -109,21 +109,21 @@ func (f *TextFormatter) Format(entity *Entity) ([]byte, error) {
 		}
 
 		// TODO may encounter effective issue using so many fmt
-		f.appendKeyValue(b, true, entry.Level, "level", strings.ToUpper(entry.Level.String())[0:4])
+		f.appendKeyValue(b, level2color[entry.Level], entry.Level, "level", strings.ToUpper(entry.Level.String())[0:4])
 		if !f.DisableTimestamp {
 			if f.FullTimestamp {
-				f.appendKeyValue(b, false, entry.Level, "time", fmt.Sprintf("[%s]", entry.Time.Format(f.TimestampFormat)))
+				f.appendKeyValue(b, nocolor, entry.Level, "time", fmt.Sprintf("[%s]", entry.Time.Format(f.TimestampFormat)))
 			} else {
-				f.appendKeyValue(b, false, entry.Level, "time", fmt.Sprintf("[%d]", miniTS()))
+				f.appendKeyValue(b, nocolor, entry.Level, "time", fmt.Sprintf("[%d]", miniTS()))
 			}
 		}
 		if entity.ID != "" {
-			f.appendKeyValue(b, true, entry.Level, "id", entity.ID)
+			f.appendKeyValue(b, green, entry.Level, "id", entity.ID)
 		}
 		if entity.logger.Flag&(Llongfile|Lshortfile) != 0 {
-			f.appendKeyValue(b, false, entry.Level, "file", "")
+			f.appendKeyValue(b, nocolor, entry.Level, "file", "")
 		}
-		f.appendKeyValue(b, false, entry.Level, "msg", entry.Data)
+		f.appendKeyValue(b, nocolor, entry.Level, "msg", entry.Data)
 		b.WriteByte('\n')
 	}
 
@@ -142,10 +142,10 @@ func needsQuoting(text string) bool {
 	return true
 }
 
-func (f *TextFormatter) appendKeyValue(b *bytes.Buffer, colorit bool, level Level, key string, value interface{}) {
+func (f *TextFormatter) appendKeyValue(b *bytes.Buffer, color int, level Level, key string, value interface{}) {
 	if isColored {
-		if colorit {
-			fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m", level2color[level], value)
+		if color != 0 {
+			fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m", color, value)
 		} else {
 			fmt.Fprint(b, value)
 		}
