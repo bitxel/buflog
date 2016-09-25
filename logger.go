@@ -1,6 +1,7 @@
 package buflog
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ func (l *Logger) SetFlag(flag int) {
 
 // SetOutput sets out writter
 func (l *Logger) SetOutput(out io.Writer) {
+	fmt.Println("ss", out)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.Out = out

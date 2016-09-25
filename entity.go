@@ -66,18 +66,27 @@ func (e *Entity) Log(level Level, content string) {
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.cache = append(e.cache, NewEntry(level, content))
 	e.size += len(content)
+	e.mu.Unlock()
+
+	// It's not need, but to do as original log pkg do
+	// TODO
+	if e.logger.BufTimeout == 0 {
+		e.Flush()
+		return
+	}
+	if level >= FatalLevel {
+		// Flush all, just wait other entity timeout, will block other goroutine
+		// TODO
+		time.Sleep(e.logger.BufTimeout)
+		e.Flush()
+		return
+	}
+
 	if e.inBuffer == false {
 		e.inBuffer = true
-		if level >= FatalLevel {
-			// Flush all, just wait until timeout, not a perfect way
-			time.Sleep(e.logger.BufTimeout)
-			e.Flush()
-		} else {
-			go e.Start()
-		}
+		go e.Start()
 	}
 }
 
